@@ -36,7 +36,9 @@ all_tests() ->
      scenario12,
      scenario13,
      scenario14,
-     scenario15
+     scenario15,
+     scenario16,
+     scenario17
     ].
 
 groups() ->
@@ -251,13 +253,79 @@ scenario15(_Config) ->
                         delivery_limit => 1}, Commands),
     ok.
 
+scenario16(_Config) ->
+    C1 = {<<>>, c:pid(0,3946,0)},
+    C2 = {<<>>, c:pid(0,3947,0)},
+    E = c:pid(0,3945,1),
+    Commands = [make_checkout(C1, {auto, 1, simple_prefetch}),
+                make_checkout(C2, {auto, 1, simple_prefetch}),
+                make_enqueue(E, 1, msg1),
+                {down, C1, noproc},
+                make_enqueue(E, 2, msg2),
+                {down, E, noconnection},
+                make_settle(C1, [1]),
+                make_settle(C2, [2])
+               ],
+    run_snapshot_test(#{name => ?FUNCTION_NAME,
+                        delivery_limit => 1}, Commands),
+    ok.
+
+%% Failing testcase for scenario17:
+%% {value,
+%% [{46,406,false,1},
+%%  [
+%%   {enqueue,<0.11591.0>,1,<<>>},
+%%   {checkout,
+%%   {<<>>,<0.12112.0>},
+%%   {auto,1,simple_prefetch},
+%%   #{ack => true,args => [],prefetch => 1,
+%%   username => <<"user">>}},
+%%   {down,<0.11591.0>,noconnection},
+%%   {checkout,
+%%   {<<0>>,<0.12112.0>},
+%%   {auto,1,simple_prefetch},
+%%   #{ack => true,args => [],prefetch => 1,
+%%   username => <<"user">>}},
+%%   {down,<0.11591.0>,noconnection},
+%%   {enqueue,<0.11591.0>,2,<<>>},
+%%   {settle,{<<>>,<0.12112.0>},[0]},
+%%   {settle,{<<0>>,<0.12112.0>},[0]}]]}]}
+
+scenario17(_Config) ->
+    E = c:pid(0,11591,0),
+    C1 = {<<>>, c:pid(0,12112,0)},
+    Commands = [make_enqueue(E, 1, <<>>),
+                rabbit_fifo:make_checkout(C1, {auto, 1, simple_prefetch},
+                                          #{ack => true,
+                                            prefetch => 1,
+                                            args => [],
+                                            username => <<"user">>}),
+                {down, E, noconnection},
+                rabbit_fifo:make_checkout(C1, {auto, 1, simple_prefetch},
+                                          #{ack => true,
+                                            prefetch => 1,
+                                            args => [],
+                                            username => <<"user">>}),
+                {down, E, noconnection},
+                make_enqueue(E, 2, <<>>),
+                make_settle(C1, [0]),
+                make_settle({<<0>>, c:pid(0, 12112, 0)}, [0])
+               ],
+
+    run_snapshot_test(#{name => ?FUNCTION_NAME,
+                        max_length => 46,
+                        max_bytes => 406,
+                        single_active_consumer_on => false,
+                        delivery_limit => 1}, Commands),
+    ok.
+
 snapshots(_Config) ->
     run_proper(
       fun () ->
               ?FORALL({Length, Bytes, SingleActiveConsumer, DeliveryLimit},
                       frequency([{10, {0, 0, false, 0}},
                                  {5, {non_neg_integer(), non_neg_integer(),
-                                      boolean(), non_neg_integer()}}]),
+                                      boolean(), range(1, 2)}}]),
                       ?FORALL(O, ?LET(Ops, log_gen(200), expand(Ops)),
                               collect({Length, Bytes},
                                       snapshots_prop(
